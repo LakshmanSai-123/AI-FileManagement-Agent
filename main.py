@@ -1,6 +1,3 @@
-from pathlib import Path
-
-project_code = r'''
 # ============================================================
 # AI FILE MANAGEMENT AGENT
 # Python + Groq API
@@ -28,51 +25,48 @@ CATEGORIES = {
     "Images": [".jpg", ".jpeg", ".png", ".gif", ".webp"],
     "Code": [".py", ".java", ".c", ".cpp", ".js", ".html", ".css"],
     "Spreadsheets": [".xlsx", ".xls", ".csv"],
-    "Archives": [".zip", ".rar", ".7z"]
+    "Archives": [".zip", ".rar", ".7z"],
 }
 
-SOURCE_FOLDER.mkdir(parents=True, exist_ok=True)
-
-for category in CATEGORIES:
-    (SOURCE_FOLDER / category).mkdir(exist_ok=True)
-
-
-def get_api_key():
-    """Read the API key from Colab Secrets or an environment variable."""
-
-    api_key = os.environ.get("GROQ_API_KEY")
-
-    if not api_key:
-        try:
-            from google.colab import userdata
-            api_key = userdata.get("Gen_AI")
-        except (ImportError, Exception):
-            api_key = None
-
-    if not api_key:
-        raise RuntimeError(
-            "Groq API key not found. Configure GROQ_API_KEY "
-            "or add Gen_AI to Google Colab Secrets."
-        )
-
-    return api_key
-
-
-client = Groq(api_key=get_api_key())
 MODEL = "openai/gpt-oss-20b"
+client = None
 
-print("AI File Management Agent is ready!")
-print("Workspace:", SOURCE_FOLDER)
+
+def ensure_workspace():
+    """Create the workspace and its category folders."""
+    SOURCE_FOLDER.mkdir(parents=True, exist_ok=True)
+
+    for category in CATEGORIES:
+        (SOURCE_FOLDER / category).mkdir(exist_ok=True)
+
+
+def get_client():
+    """Initialize Groq only when an AI request is needed."""
+    global client
+
+    if client is None:
+        api_key = os.environ.get("GROQ_API_KEY")
+
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY is not configured. "
+                "Set it as an environment variable."
+            )
+
+        client = Groq(api_key=api_key)
+
+    return client
 
 
 # ============================================================
-# 2. TOOL 1: LIST FILES
+# 2. TOOL: LIST FILES
 # ============================================================
 
 def list_files():
     """Display files and folders in the workspace."""
+    ensure_workspace()
 
-    print("\\nFILES AND FOLDERS")
+    print("\nFILES AND FOLDERS")
 
     for item in sorted(SOURCE_FOLDER.iterdir()):
         if item.is_file():
@@ -82,16 +76,16 @@ def list_files():
 
             for child in sorted(item.iterdir()):
                 if child.is_file():
-                    print(child.name)
+                    print(f"   {child.name}")
 
 
 # ============================================================
-# 3. TOOL 2: COUNT FILES
+# 3. TOOL: COUNT FILES
 # ============================================================
 
 def get_actual_counts():
-    """Count files in each category."""
-
+    """Count files in each category folder."""
+    ensure_workspace()
     counts = {}
 
     for category in CATEGORIES:
@@ -107,48 +101,45 @@ def get_actual_counts():
 
 def count_files():
     """Print category-wise file counts."""
-
     counts = get_actual_counts()
 
-    print("\\nFILE COUNT REPORT")
-
-    total = 0
+    print("\nFILE COUNT REPORT")
 
     for category, count in counts.items():
         print(f"{category}: {count}")
-        total += count
 
-    print(f"Total categorised files: {total}")
+    print(f"Total categorized files: {sum(counts.values())}")
 
     return counts
 
 
 # ============================================================
-# 4. TOOL 3: ORGANIZE FILES
+# 4. TOOL: ORGANIZE FILES
 # ============================================================
 
 def organize_files():
     """
-    Organize supported files from the workspace root.
-    Existing files are not overwritten.
-    Unsupported files are left untouched.
+    Move supported files from the workspace root into categories.
+    Do not overwrite existing destination files.
+    Leave unsupported files untouched.
     """
+    ensure_workspace()
 
     moved = []
     skipped = []
 
     for item in list(SOURCE_FOLDER.iterdir()):
-
         if not item.is_file():
             continue
 
-        extension = item.suffix.lower()
-        destination_category = None
-
-        for category, extensions in CATEGORIES.items():
-            if extension in extensions:
-                destination_category = category
-                break
+        destination_category = next(
+            (
+                category
+                for category, extensions in CATEGORIES.items()
+                if item.suffix.lower() in extensions
+            ),
+            None,
+        )
 
         if destination_category is None:
             skipped.append(item.name)
@@ -164,36 +155,35 @@ def organize_files():
             continue
 
         shutil.move(str(item), str(destination))
-
         moved.append(f"{item.name} -> {destination_category}/")
 
-    print("\\nORGANIZATION REPORT")
+    print("\nORGANIZATION REPORT")
 
     if moved:
-        for item in moved:
-            print("", item)
+        for filename in moved:
+            print("done", filename)
     else:
         print("No supported files needed moving.")
 
     if skipped:
-        print("\\nSkipped files:")
-
-        for item in skipped:
-            print("", item)
+        print("\nSkipped files:")
+        for filename in skipped:
+            print("warning", filename)
 
     return moved, skipped
 
 
-# Keep the original British spelling available for compatibility.
+# British spelling alias
 organise_files = organize_files
 
 
 # ============================================================
-# 5. TOOL VERIFICATION
+# 5. VERIFY ORGANIZATION
 # ============================================================
 
 def verify_organization():
-    """Check whether supported files remain in the root."""
+    """Check whether supported files remain in the workspace root."""
+    ensure_workspace()
 
     supported_extensions = {
         extension
@@ -210,7 +200,7 @@ def verify_organization():
 
     if remaining:
         return False, (
-            "Some supported files remain in the root: "
+            "Supported files remain in the root: "
             + ", ".join(remaining)
         )
 
@@ -221,7 +211,7 @@ verify_organisation = verify_organization
 
 
 # ============================================================
-# 6. DEFINE TOOLS FOR THE AI MODEL
+# 6. AI TOOL DEFINITIONS
 # ============================================================
 
 tools = [
@@ -233,9 +223,9 @@ tools = [
             "parameters": {
                 "type": "object",
                 "properties": {},
-                "required": []
-            }
-        }
+                "required": [],
+            },
+        },
     },
     {
         "type": "function",
@@ -245,32 +235,31 @@ tools = [
             "parameters": {
                 "type": "object",
                 "properties": {},
-                "required": []
-            }
-        }
+                "required": [],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "organize_files",
             "description": (
-                "Move supported files from the workspace root "
-                "into category folders. Never overwrite files."
+                "Organize supported files from the workspace root "
+                "without overwriting existing destination files."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {},
-                "required": []
-            }
-        }
-    }
+                "required": [],
+            },
+        },
+    },
 ]
-
 
 available_functions = {
     "list_files": list_files,
     "count_files": count_files,
-    "organize_files": organize_files
+    "organize_files": organize_files,
 }
 
 
@@ -279,80 +268,69 @@ available_functions = {
 # ============================================================
 
 def local_agent(instruction):
-    """Rule-based fallback that does not call the Groq API."""
-
+    """Handle basic commands without the AI API."""
     instruction = instruction.lower()
 
-    print("\\n🛠️ Local fallback activated.")
+    print("\n🛠️ Local fallback activated.")
 
-    if any(word in instruction for word in [
-        "count", "how many", "number of"
-    ]):
+    if any(word in instruction for word in (
+        "count", "how many", "number of",
+    )):
         count_files()
 
-    elif any(word in instruction for word in [
-        "list", "show", "display"
-    ]):
+    elif any(word in instruction for word in (
+        "list", "show", "display",
+    )):
         list_files()
 
-    elif any(word in instruction for word in [
-        "organise", "organize", "sort files"
-    ]):
+    elif any(word in instruction for word in (
+        "organize", "organise", "sort files",
+    )):
         organize_files()
-
-        success, details = verify_organization()
-        print("\\nVerification:", details)
+        _, details = verify_organization()
+        print("\nVerification:", details)
 
     else:
         print(
-            "I couldn't match that instruction to a local rule. "
+            "I couldn't match that instruction. "
             "Try asking me to list, count, or organize files."
         )
 
 
 # ============================================================
-# 8. FINAL AI AGENT
+# 8. AI AGENT
 # ============================================================
 
 def smart_agent(instruction):
-
-    print("\\n" + "=" * 50)
+    """Ask Groq to select an approved file-management tool."""
+    print("\n" + "=" * 50)
     print("USER INSTRUCTION:", instruction)
     print("=" * 50)
 
     try:
-        response = client.chat.completions.create(
+        response = get_client().chat.completions.create(
             model=MODEL,
             messages=[
                 {
                     "role": "system",
-                    "content": """
-You are an AI file management agent.
-
-Select the appropriate available tool.
-
-Rules:
-- Use list_files when the user wants to see files.
-- Use count_files when the user asks about file counts.
-- Use organize_files when the user asks to organize or sort files.
-- Do not claim an action succeeded before it is executed.
-- If no tool is appropriate, answer briefly.
-- Never invent file counts or claim to access files outside
-  the provided workspace.
-"""
+                    "content": (
+                        "You are an AI file management agent. "
+                        "Use list_files to list files, count_files "
+                        "to count files, and organize_files to "
+                        "organize supported files. Do not claim an "
+                        "action succeeded before its execution. "
+                        "Use only the approved tools."
+                    ),
                 },
-                {
-                    "role": "user",
-                    "content": instruction
-                }
+                {"role": "user", "content": instruction},
             ],
             tools=tools,
             tool_choice="auto",
-            max_completion_tokens=300
+            max_completion_tokens=300,
         )
 
     except Exception as error:
-        print("\\n Groq API unavailable.")
+        print("\n⚠️ Groq API unavailable.")
         print("Reason:", str(error)[:250])
         local_agent(instruction)
         return
@@ -361,21 +339,19 @@ Rules:
 
     if not message.tool_calls:
         print(
-            "\\n AI:",
-            message.content or
-            "Please give me a file-management instruction."
+            "\n🤖 AI:",
+            message.content or "Please enter a file-management instruction.",
         )
         return
 
     for tool_call in message.tool_calls:
-
         function_name = tool_call.function.name
 
         if function_name not in available_functions:
-            print("Unknown tool requested:", function_name)
+            print("warning Unknown tool requested:", function_name)
             continue
 
-        print("\\n🔧 AI selected tool:", function_name)
+        print("\n🔧 AI selected tool:", function_name)
 
         try:
             output = StringIO()
@@ -386,7 +362,7 @@ Rules:
             captured_output = output.getvalue()
 
             if captured_output:
-                print(captured_output)
+                print(captured_output, end="")
 
             if function_name == "count_files":
                 print("🔍 Local verification:", get_actual_counts())
@@ -395,17 +371,11 @@ Rules:
                 print("🔍 Workspace checked:", SOURCE_FOLDER.exists())
 
             elif function_name == "organize_files":
-                success, details = verify_organization()
+                _, details = verify_organization()
                 print("🔍 Verification:", details)
 
-                if not success:
-                    print(
-                        " Some supported files may need "
-                        "another organization attempt."
-                    )
-
         except Exception as error:
-            print("Tool execution failed:", str(error))
+            print(" Tool execution failed:", str(error))
 
 
 # ============================================================
@@ -413,37 +383,34 @@ Rules:
 # ============================================================
 
 def main():
+    """Start the interactive agent."""
+    ensure_workspace()
 
-    print("\\nExamples:")
+    print("AI File Management Agent is ready!")
+    print("Workspace:", SOURCE_FOLDER)
+    print("\nExamples:")
     print("- List my files")
     print("- How many files are in each category?")
     print("- Organize my files")
-    print("- exit to stop the agent")
+    print("- Type exit to stop the agent")
 
     while True:
-
         try:
-            user_instruction = input("\\nYou: ").strip()
+            instruction = input("\nYou: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\\nAgent stopped. Goodbye!")
+            print("\nAgent stopped. Goodbye!")
             break
 
-        if user_instruction.lower() in ["exit", "quit", "stop"]:
+        if instruction.lower() in ("exit", "quit", "stop"):
             print("Agent stopped. Goodbye!")
             break
 
-        if not user_instruction:
+        if not instruction:
             print("Please enter an instruction.")
             continue
 
-        smart_agent(user_instruction)
+        smart_agent(instruction)
 
 
 if __name__ == "__main__":
     main()
-'''
-
-Path("main.py").write_text(project_code.strip() + "\n", encoding="utf-8")
-
-print("Created main.py")
-print("File size:", Path("main.py").stat().st_size, "bytes")
