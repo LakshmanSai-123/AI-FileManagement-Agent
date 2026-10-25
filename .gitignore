@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment variables and API keys
+.env
+.env.*
+!.env.example
+
+# Local workspace files
+MyFiles/
+
+# Test cache
+.pytest_cache/
+.coverage
+
+# Virtual environments
+venv/
+.venv/
+
+# Jupyter files
+.ipynb_checkpoints/
